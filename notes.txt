@@ -1,0 +1,3 @@
+vlc has its lua run on port 8080 by default.
+so this should run on 5173
+app frontend is sorted... need to work on the connection and all now.
