@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,10 @@ export default function ConnectPanel() {
   const [probeResult, setProbeResult] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [serverIp, setServerIp] = useState(null);
+  const [devices, setDevices] = useState([]);
   const wsRef = useRef(null);
+
+  const navigate = useNavigate();
 
   const parseIpPort = (text) => {
     const trimmed = text.trim();
@@ -28,7 +32,8 @@ export default function ConnectPanel() {
     return { ip: trimmed, port: 8080 };
   };
 
-  const handleProbe = async () => {
+  // Scan a single host (verify) — renamed from 'probe' to 'verify' internally
+  const handleVerify = async () => {
     const parsed = parseIpPort(input);
     if (!parsed) return toast.error("Enter IP or IP:PORT");
     setProbing(true);
@@ -41,43 +46,54 @@ export default function ConnectPanel() {
       });
       const json = await res.json();
       if (!json.ok) {
-        toast.error(json.error || "Probe failed");
+        toast.error(json.error || "Check failed");
         setProbeResult({ ok: false, error: json.error });
       } else {
-        setProbeResult({ ok: true, status: json.status });
-        toast.success("Probe successful");
+        setProbeResult({ ok: true, status: json.status, ip: parsed.ip, port: parsed.port });
+        toast.success("Device available");
       }
     } catch (e) {
-      toast.error(e.message || "Probe failed");
+      toast.error(e.message || "Check failed");
       setProbeResult({ ok: false, error: e.message });
     } finally {
       setProbing(false);
     }
   };
 
-  const handleConnect = () => {
-    const parsed = parseIpPort(input);
-    if (!parsed) return toast.error("Enter IP or IP:PORT");
+  const handleConnect = ({ ip, port }) => {
+    const target = ip && port ? { ip, port } : parseIpPort(input);
+    if (!target) return toast.error("Select or enter an IP to connect");
     // create websocket and subscribe
     if (wsRef.current) wsRef.current.close();
+    setIsConnected(false);
     const { socket, subscribe } = createVlcSocket(`${BACKEND_BASE.replace(/^http/, "ws")}`);
     wsRef.current = socket;
+
     socket.onopen = () => {
-      subscribe(parsed.ip, parsed.port);
-      setIsConnected(true);
-      setServerIp(`${parsed.ip}:${parsed.port}`);
-      toast.success("Connected (websocket)");
+      subscribe(target.ip, target.port);
     };
+
     socket.onclose = () => {
       setIsConnected(false);
       toast("Disconnected");
     };
+
     socket.onmessage = (ev) => {
       try {
         const d = JSON.parse(ev.data);
+        if (d.type === "subscribed") {
+          setIsConnected(true);
+          setServerIp(`${target.ip}:${target.port}`);
+          localStorage.setItem("serverIp", `${target.ip}:${target.port}`);
+          toast.success("Connected — opening dashboard...");
+          // navigate to dashboard
+          navigate("/dashboard");
+        }
         if (d.type === "status") {
-          // keep last probeResult in sync
           setProbeResult({ ok: true, status: d.status });
+        }
+        if (d.type === "error") {
+          toast.error(d.error || "Error from backend");
         }
       } catch (e) {
         // ignore
@@ -90,6 +106,28 @@ export default function ConnectPanel() {
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
+
+  // Scan the entire local network (calls backend /discover)
+  const handleScanNetwork = async () => {
+    setProbing(true);
+    setDevices([]);
+    try {
+      const res = await fetch(`${BACKEND_BASE}/discover`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const json = await res.json();
+      if (json.ok) {
+        // Map to friendly device objects: show app name guess and port small
+        const devs = json.devices.map(d => ({ ip: d.ip, port: d.port, name: (d.status && d.status.now_playing && d.status.now_playing.title) ? "VLC" : "VLC" , raw: d.status || d }));
+        setDevices(devs);
+        toast.success(`Found ${devs.length} device(s)`);
+      } else {
+        toast.error(json.error || "No devices found");
+      }
+    } catch (e) {
+      toast.error(e.message || "Scan failed");
+    } finally {
+      setProbing(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -104,8 +142,8 @@ export default function ConnectPanel() {
       </div>
 
       <div className="flex gap-3">
-        <Button onClick={handleProbe} className="flex-1 h-14" disabled={probing}>{probing ? 'Probing...' : 'Probe'}</Button>
-        <Button onClick={handleConnect} className="flex-1 h-14">Connect (WS)</Button>
+        <Button onClick={handleScanNetwork} className="flex-1 h-14" disabled={probing}>{probing ? 'Scanning...' : 'Scan network'}</Button>
+        <Button onClick={() => handleVerify()} className="flex-1 h-14">Check</Button>
       </div>
 
       <div>
@@ -113,18 +151,37 @@ export default function ConnectPanel() {
       </div>
 
       <div className="bg-card rounded-xl p-4 text-sm text-left">
-        {probeResult ? (
-          probeResult.ok ? (
-            <div>
-              <div className="font-medium mb-1">Status</div>
-              <pre className="text-xs max-h-40 overflow-auto">{JSON.stringify(probeResult.status, null, 2)}</pre>
-            </div>
-          ) : (
-            <div className="text-destructive">Probe error: {probeResult.error}</div>
-          )
+        <div className="font-medium mb-2">Discovered devices</div>
+        {devices.length ? (
+          <div className="space-y-2">
+            {devices.map((d, i) => (
+              <div key={`${d.ip}:${d.port}:${i}`} className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold">{d.name}</div>
+                  <div className="text-xs text-muted-foreground">port {d.port}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => handleConnect({ ip: d.ip, port: d.port })}>Connect</Button>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
-          <div className="text-muted-foreground">No probe performed yet.</div>
+          <div className="text-muted-foreground">No devices discovered yet. Try scanning the network.</div>
         )}
+
+        <div className="mt-4">
+          <div className="font-medium mb-1">Last check</div>
+          {probeResult ? (
+            probeResult.ok ? (
+              <pre className="text-xs max-h-40 overflow-auto">{JSON.stringify(probeResult.status, null, 2)}</pre>
+            ) : (
+              <div className="text-destructive">Check error: {probeResult.error}</div>
+            )
+          ) : (
+            <div className="text-muted-foreground">No single-host check performed yet.</div>
+          )}
+        </div>
       </div>
     </div>
   );

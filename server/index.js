@@ -3,6 +3,7 @@ import cors from "cors";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { getStatus, sendCommand } from "./vlc.js";
+import { discoverNetwork } from "./discover.js";
 
 const app = express();
 app.use(cors());
@@ -14,6 +15,17 @@ app.post("/probe", async (req, res) => {
   try {
     const status = await getStatus(ip, port, auth);
     return res.json({ ok: true, status });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Discover devices across the local network (scans common ports).
+app.post("/discover", async (req, res) => {
+  const { ports, auth } = req.body || {};
+  try {
+    const found = await discoverNetwork({ ports, auth });
+    return res.json({ ok: true, devices: found });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
