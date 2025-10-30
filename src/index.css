@@ -8,59 +8,60 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 48 100% 94%;
-    --foreground: 0 0% 20%;
+    /* Blue theme: primary/secondary shifted to blues */
+    --background: 210 40% 98%;
+    --foreground: 217 18% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 20%;
+    --card-foreground: 217 18% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 20%;
+    --popover-foreground: 217 18% 12%;
 
-    --primary: 45 100% 65%;
-    --primary-foreground: 0 0% 20%;
+    --primary: 210 100% 50%; /* vivid blue */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 36 100% 50%;
+    --secondary: 200 100% 45%; /* cyan-blue */
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 48 95% 85%;
-    --muted-foreground: 0 0% 45%;
+    --muted: 210 50% 94%;
+    --muted-foreground: 217 18% 40%;
 
-    --accent: 36 100% 50%;
+    --accent: 210 90% 55%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 48 80% 85%;
-    --input: 48 80% 90%;
-    --ring: 45 100% 65%;
+    --border: 210 30% 92%;
+    --input: 210 30% 96%;
+    --ring: 210 100% 50%;
 
     --radius: 1rem;
     
-    --gradient-primary: linear-gradient(135deg, hsl(45 100% 65%), hsl(36 100% 50%));
-    --gradient-subtle: linear-gradient(180deg, hsl(48 100% 98%), hsl(48 100% 94%));
+    --gradient-primary: linear-gradient(135deg, hsl(210 100% 50%), hsl(200 100% 45%));
+    --gradient-subtle: linear-gradient(180deg, hsl(210 40% 98%), hsl(210 40% 94%));
     
-    --shadow-glow: 0 8px 32px hsl(45 100% 65% / 0.3);
-    --shadow-card: 0 4px 16px hsl(0 0% 0% / 0.08);
+    --shadow-glow: 0 8px 32px hsl(210 100% 50% / 0.18);
+    --shadow-card: 0 4px 16px hsl(217 18% 12% / 0.06);
     
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
-    --sidebar-background: 0 0% 98%;
+    --sidebar-background: 210 20% 98%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-foreground: 217 18% 12%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary: 217 18% 8%;
 
-    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-primary-foreground: 0 0% 100%;
 
-    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent: 210 20% 96%;
 
-    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-accent-foreground: 217 18% 12%;
 
-    --sidebar-border: 220 13% 91%;
+    --sidebar-border: 210 12% 91%;
 
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-ring: 210 90% 50%;
   }
 
   .dark {
