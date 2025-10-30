@@ -8,11 +8,13 @@ import { SeekBar } from "@/components/SeekBar";
 import { Button } from "@/components/ui/button";
 import { Settings, LogOut } from "lucide-react";
 import { toast } from "sonner";
+import ThemeToggle from "@/components/ThemeToggle";
+import * as vlcClient from "@/lib/vlcClient";
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [serverIp, setServerIp] = useState(localStorage.getItem("serverIp") || "");
-  const [isConnected, setIsConnected] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(50);
   const [currentTime, setCurrentTime] = useState(0);
@@ -29,44 +31,118 @@ const Dashboard = () => {
       return;
     }
 
-    // Simulate connection
-    toast.success("Connected to CouchCtrl Server");
+    let offStatus = null;
+    let offEvent = null;
+    let disconnected = false;
 
-    // Simulate playback time update
-    const interval = setInterval(() => {
-      if (isPlaying && currentTime < duration) {
-        setCurrentTime(prev => prev + 1);
+    (async () => {
+      try {
+        const [ip, portStr] = serverIp.split(":");
+        const port = Number(portStr) || 8080;
+        await vlcClient.connectToServer(ip, port);
+        toast.success("Connected to CouchCtrl Server");
+
+        offStatus = vlcClient.onStatus((status) => {
+          try {
+            setIsConnected(true);
+            setIsPlaying(status.state === 'playing' || status.state === 'play');
+            if (status.volume !== undefined) setVolume(Number(status.volume));
+            if (status.time !== undefined) setCurrentTime(Number(status.time));
+            if (status.length !== undefined) setDuration(Number(status.length));
+            if (status.now_playing) {
+              const meta = status.now_playing;
+              setTrack({
+                title: meta.title || meta.filename || 'VLC',
+                artist: meta.artist || meta.album || 'Unknown Artist',
+                artwork: null
+              });
+            }
+          } catch (e) {}
+        });
+
+        offEvent = vlcClient.onEvent((ev) => {
+          if (ev.type === 'subscribed') {
+            setIsConnected(true);
+          }
+          if (ev.type === 'unsubscribed') {
+            setIsConnected(false);
+          }
+          if (ev.type === 'error') {
+            toast.error(ev.error || 'Backend error');
+          }
+        });
+      } catch (e) {
+        toast.error("Failed to connect to server: " + (e.message || e));
+        navigate('/');
       }
-    }, 1000);
+    })();
 
-    return () => clearInterval(interval);
-  }, [serverIp, navigate, isPlaying, currentTime, duration]);
+    return () => {
+      try {
+        if (offStatus) offStatus();
+        if (offEvent) offEvent();
+        vlcClient.disconnect();
+        disconnected = true;
+      } catch (e) {}
+    };
+  }, [serverIp, navigate]);
 
   const handlePlayPause = () => {
-    setIsPlaying(!isPlaying);
-    toast.info(isPlaying ? "Paused" : "Playing");
+    try {
+      vlcClient.sendVlcCommand('pl_pause');
+      setIsPlaying(prev => !prev);
+      toast.info(isPlaying ? "Paused" : "Playing");
+    } catch (e) {
+      toast.error('Failed to send play/pause: ' + (e.message || e));
+    }
   };
 
   const handlePrevious = () => {
-    setCurrentTime(0);
-    toast.info("Previous track");
+    try {
+      vlcClient.sendVlcCommand('pl_previous');
+      setCurrentTime(0);
+      toast.info("Previous track");
+    } catch (e) {
+      toast.error('Failed to send previous: ' + (e.message || e));
+    }
   };
 
   const handleNext = () => {
-    setCurrentTime(0);
-    toast.info("Next track");
+    try {
+      vlcClient.sendVlcCommand('pl_next');
+      setCurrentTime(0);
+      toast.info("Next track");
+    } catch (e) {
+      toast.error('Failed to send next: ' + (e.message || e));
+    }
   };
 
   const handleFullscreen = () => {
-    toast.info("Toggled fullscreen");
+    try {
+      vlcClient.sendVlcCommand('fullscreen');
+      toast.info("Toggled fullscreen");
+    } catch (e) {
+      toast.error('Failed to toggle fullscreen: ' + (e.message || e));
+    }
   };
 
   const handleVolumeChange = (newVolume) => {
-    setVolume(newVolume);
+    try {
+      // VLC expects volume as an integer; this may need mapping depending on VLC config
+      vlcClient.sendVlcCommand('volume', { val: newVolume });
+      setVolume(newVolume);
+    } catch (e) {
+      toast.error('Failed to set volume: ' + (e.message || e));
+    }
   };
 
   const handleSeek = (newTime) => {
-    setCurrentTime(newTime);
+    try {
+      vlcClient.sendVlcCommand('seek', { val: newTime });
+      setCurrentTime(newTime);
+    } catch (e) {
+      toast.error('Failed to seek: ' + (e.message || e));
+    }
   };
 
   const handleDisconnect = () => {
@@ -84,6 +160,7 @@ const Dashboard = () => {
             CouchCtrl
           </h1>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button
               variant="ghost"
               size="icon"

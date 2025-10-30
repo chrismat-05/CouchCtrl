@@ -20,7 +20,7 @@ async function checkHost(ip, ports, auth) {
   return null;
 }
 
-export async function discoverNetwork({ ports = [8080, 8081, 8000, 3000, 9090], auth } = {}) {
+export async function discoverNetwork({ ports = [8080, 8081, 8000, 3000, 9090, 8090, 8082, 8443], auth } = {}) {
   // Determine local IPv4 addresses
   const nets = os.networkInterfaces();
   const candidates = [];

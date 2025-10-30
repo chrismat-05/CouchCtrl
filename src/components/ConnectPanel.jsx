@@ -64,41 +64,29 @@ export default function ConnectPanel() {
     const target = ip && port ? { ip, port } : parseIpPort(input);
     if (!target) return toast.error("Select or enter an IP to connect");
     // create websocket and subscribe
-    if (wsRef.current) wsRef.current.close();
-    setIsConnected(false);
-    const { socket, subscribe } = createVlcSocket(`${BACKEND_BASE.replace(/^http/, "ws")}`);
-    wsRef.current = socket;
-
-    socket.onopen = () => {
-      subscribe(target.ip, target.port);
-    };
-
-    socket.onclose = () => {
-      setIsConnected(false);
-      toast("Disconnected");
-    };
-
-    socket.onmessage = (ev) => {
+    // Use shared vlcClient so other components can receive status updates
+    import("@/lib/vlcClient").then(async (mod) => {
       try {
-        const d = JSON.parse(ev.data);
-        if (d.type === "subscribed") {
-          setIsConnected(true);
-          setServerIp(`${target.ip}:${target.port}`);
-          localStorage.setItem("serverIp", `${target.ip}:${target.port}`);
-          toast.success("Connected — opening dashboard...");
-          // navigate to dashboard
-          navigate("/dashboard");
-        }
-        if (d.type === "status") {
-          setProbeResult({ ok: true, status: d.status });
-        }
-        if (d.type === "error") {
-          toast.error(d.error || "Error from backend");
-        }
+        const client = mod;
+        await client.connectToServer(target.ip, target.port);
+        client.onEvent((ev) => {
+          if (ev.type === 'subscribed') {
+            setIsConnected(true);
+            setServerIp(`${target.ip}:${target.port}`);
+            localStorage.setItem("serverIp", `${target.ip}:${target.port}`);
+            toast.success("Connected — opening dashboard...");
+            navigate("/dashboard");
+          }
+          if (ev.type === 'error') {
+            toast.error(ev.error || 'Error from backend');
+          }
+        });
+
+        client.onStatus((status) => setProbeResult({ ok: true, status }));
       } catch (e) {
-        // ignore
+        toast.error(e.message || 'Connection failed');
       }
-    };
+    });
   };
 
   useEffect(() => {
@@ -116,7 +104,19 @@ export default function ConnectPanel() {
       const json = await res.json();
       if (json.ok) {
         // Map to friendly device objects: show app name guess and port small
-        const devs = json.devices.map(d => ({ ip: d.ip, port: d.port, name: (d.status && d.status.now_playing && d.status.now_playing.title) ? "VLC" : "VLC" , raw: d.status || d }));
+        const detectName = (d) => {
+          try {
+            const s = d.status || {};
+            if (s.raw && s.raw.information) return 'VLC';
+            if (s.rawText && s.rawText.toLowerCase().includes('vlc')) return 'VLC';
+            // other heuristics could be added here
+            return 'Media Player';
+          } catch (e) {
+            return 'Media Player';
+          }
+        };
+
+        const devs = json.devices.map(d => ({ ip: d.ip, port: d.port, name: detectName(d), raw: d.status || d }));
         setDevices(devs);
         toast.success(`Found ${devs.length} device(s)`);
       } else {
@@ -154,17 +154,18 @@ export default function ConnectPanel() {
         <div className="font-medium mb-2">Discovered devices</div>
         {devices.length ? (
           <div className="space-y-2">
-            {devices.map((d, i) => (
-              <div key={`${d.ip}:${d.port}:${i}`} className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-semibold">{d.name}</div>
-                  <div className="text-xs text-muted-foreground">port {d.port}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => handleConnect({ ip: d.ip, port: d.port })}>Connect</Button>
-                </div>
-              </div>
-            ))}
+                {devices.map((d, i) => (
+                  <div key={`${d.ip}:${d.port}:${i}`} className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold">{d.name || 'Unknown'}</div>
+                      <div className="text-xs text-muted-foreground">port {d.port}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button title={`Copy IP ${d.ip}`} onClick={() => { navigator.clipboard?.writeText(d.ip + ':' + d.port); toast.success('IP copied to clipboard'); }} className="text-xs text-muted-foreground px-2 py-1 rounded">IP</button>
+                      <Button size="sm" onClick={() => handleConnect({ ip: d.ip, port: d.port })}>Connect</Button>
+                    </div>
+                  </div>
+                ))}
           </div>
         ) : (
           <div className="text-muted-foreground">No devices discovered yet. Try scanning the network.</div>

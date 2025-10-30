@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Radio } from "lucide-react";
 import ConnectPanel from "@/components/ConnectPanel";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -19,6 +20,10 @@ const Index = () => {
             CouchCtrl
           </h1>
           <p className="text-muted-foreground">Control your media from anywhere on your network</p>
+          <div className="mt-3 flex justify-center">
+            {/* Theme toggle added to header */}
+            <ThemeToggle />
+          </div>
         </div>
 
         {/* Connect Form (new component) */}
