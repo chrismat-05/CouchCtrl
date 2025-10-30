@@ -6,14 +6,23 @@ import { getStatus, sendCommand } from "./vlc.js";
 import { discoverNetwork } from "./discover.js";
 
 const app = express();
-app.use(cors());
+// Configure CORS to be explicit and allow credentials if needed.
+app.use(cors({ origin: true, credentials: true, methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization"] }));
 app.use(express.json());
 
+// Simple request logger in development to help debug missing routes
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    console.log(`[dev] ${req.method} ${req.path}`);
+    next();
+  });
+}
+
 app.post("/probe", async (req, res) => {
-  const { ip, port = 8080, auth } = req.body || {};
+  const { ip, port = 8080, auth, timeout = 2000 } = req.body || {};
   if (!ip) return res.status(400).json({ ok: false, error: "Missing ip" });
   try {
-    const status = await getStatus(ip, port, auth);
+    const status = await getStatus(ip, port, auth, timeout);
     return res.json({ ok: true, status });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -22,12 +31,16 @@ app.post("/probe", async (req, res) => {
 
 // Discover devices across the local network (scans common ports).
 app.post("/discover", async (req, res) => {
-  const { ports, auth } = req.body || {};
+  // Accept optional parameters to speed/limit discovery from client
+  // Defaults chosen for responsiveness from a browser/client
+  const { ports, auth, timeout = 700, concurrency = 50, quick = true, stopOnFirst = true } = req.body || {};
   try {
-    const found = await discoverNetwork({ ports, auth });
+    console.log(`[dev] discover requested (quick=${quick}, timeout=${timeout}, concurrency=${concurrency}, stopOnFirst=${stopOnFirst})`);
+    const found = await discoverNetwork({ ports, auth, timeout, concurrency, quick, stopOnFirst });
     return res.json({ ok: true, devices: found });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
+    // Return a JSON error with a friendly message
+    return res.status(500).json({ ok: false, error: `Discovery failed: ${e.message}` });
   }
 });
 
@@ -66,7 +79,7 @@ wss.on("connection", (ws) => {
       if (subs.has(ws)) clearInterval(subs.get(ws));
       const interval = setInterval(async () => {
         try {
-          const status = await getStatus(ip, port, data.auth);
+          const status = await getStatus(ip, port, data.auth, data.timeout || 2000);
           if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "status", status }));
         } catch (e) {
           if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "error", error: e.message }));
@@ -103,4 +116,15 @@ wss.on("connection", (ws) => {
 });
 
 const PORT = process.env.PORT || 3001;
+// 404 handler that returns JSON (helps when frontend expects JSON)
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: 'Not found' });
+});
+
+// Error handler middleware to return JSON for unexpected errors
+app.use((err, req, res, next) => {
+  console.error('Server error:', err && err.stack ? err.stack : err);
+  res.status(500).json({ ok: false, error: err && err.message ? `Internal server error: ${err.message}` : 'Internal server error' });
+});
+
 server.listen(PORT, () => console.log(`CouchCtrl backend running on http://localhost:${PORT}`));

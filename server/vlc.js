@@ -1,12 +1,13 @@
 import fetch from "node-fetch";
 
-const tryJson = async (url, auth) => {
+const tryJson = async (url, auth, timeout = 1500) => {
   const headers = {};
   if (auth && auth.username) {
     const basic = Buffer.from(`${auth.username}:${auth.password || ''}`).toString("base64");
     headers.Authorization = `Basic ${basic}`;
   }
-  const res = await fetch(url, { headers, timeout: 3000 });
+  // node-fetch supports a timeout option (ms)
+  const res = await fetch(url, { headers, timeout });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const text = await res.text();
   try {
@@ -16,12 +17,12 @@ const tryJson = async (url, auth) => {
   }
 };
 
-export async function getStatus(ip, port = 8080, auth) {
+export async function getStatus(ip, port = 8080, auth, timeout = 1500) {
   const base = `http://${ip}:${port}`;
   // Prefer JSON endpoint
   try {
     const url = `${base}/requests/status.json`;
-    const json = await tryJson(url, auth);
+    const json = await tryJson(url, auth, timeout);
     // Map a small subset to a neat object
     return {
       raw: json,
@@ -35,7 +36,7 @@ export async function getStatus(ip, port = 8080, auth) {
     // Try XML endpoint as fallback (VLC may return XML)
     try {
       const url = `http://${ip}:${port}/requests/status.xml`;
-      const res = await fetch(url);
+      const res = await fetch(url, { timeout });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       return { rawText: text };
@@ -45,7 +46,7 @@ export async function getStatus(ip, port = 8080, auth) {
   }
 }
 
-export async function sendCommand(ip, port = 8080, command, params = {}, auth) {
+export async function sendCommand(ip, port = 8080, command, params = {}, auth, timeout = 1500) {
   const base = `http://${ip}:${port}`;
   // Basic commands are sent to /requests/status.xml?command=...
   const url = new URL(`${base}/requests/status.xml`);
@@ -59,7 +60,7 @@ export async function sendCommand(ip, port = 8080, command, params = {}, auth) {
     headers.Authorization = `Basic ${basic}`;
   }
 
-  const res = await fetch(url.toString(), { method: "GET", headers, timeout: 3000 });
+  const res = await fetch(url.toString(), { method: "GET", headers, timeout });
   if (!res.ok) throw new Error(`Command HTTP ${res.status}`);
   const text = await res.text();
   return { ok: true, body: text };

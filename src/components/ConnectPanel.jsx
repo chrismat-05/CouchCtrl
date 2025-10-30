@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Wifi } from "lucide-react";
+import { Wifi, Star, StarOff } from "lucide-react";
 import { toast } from "sonner";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { createVlcSocket } from "@/lib/vlcWs";
@@ -19,6 +19,11 @@ export default function ConnectPanel() {
   const [serverIp, setServerIp] = useState(null);
   const [devices, setDevices] = useState([]);
   const wsRef = useRef(null);
+  const [favorites, setFavorites] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('favorites') || '[]');
+    } catch (e) { return []; }
+  });
 
   const navigate = useNavigate();
 
@@ -32,6 +37,34 @@ export default function ConnectPanel() {
     return { ip: trimmed, port: 8080 };
   };
 
+  const maskIp = (ip) => {
+    // mask middle octet(s): 192.168.1.100 -> 192.***.***.100
+    try {
+      const parts = ip.split('.');
+      if (parts.length !== 4) return ip;
+      return `${parts[0]}.***.***.${parts[3]}`;
+    } catch (e) { return ip; }
+  };
+
+  const saveFavorites = (list) => {
+    setFavorites(list);
+    try { localStorage.setItem('favorites', JSON.stringify(list)); } catch (e) {}
+  };
+
+  const addFavorite = (d) => {
+    const exists = favorites.find(f => f.ip === d.ip && f.port === d.port);
+    if (exists) return toast('Already favorited');
+    const list = [...favorites, { ip: d.ip, port: d.port, name: d.name }];
+    saveFavorites(list);
+    toast.success('Saved to favorites');
+  };
+
+  const removeFavorite = (d) => {
+    const list = favorites.filter(f => !(f.ip === d.ip && f.port === d.port));
+    saveFavorites(list);
+    toast.success('Removed favorite');
+  };
+
   // Scan a single host (verify) — renamed from 'probe' to 'verify' internally
   const handleVerify = async () => {
     const parsed = parseIpPort(input);
@@ -42,19 +75,35 @@ export default function ConnectPanel() {
       const res = await fetch(`${BACKEND_BASE}/probe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ip: parsed.ip, port: parsed.port })
+        body: JSON.stringify({ ip: parsed.ip, port: parsed.port, timeout: 2000 })
       });
-      const json = await res.json();
-      if (!json.ok) {
-        toast.error(json.error || "Check failed");
-        setProbeResult({ ok: false, error: json.error });
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        // try to parse json, but fallback to text
+        let bodyText = '';
+        try { bodyText = await res.text(); } catch (e) {}
+        const friendly = `Unable to reach device (${res.status}). ${bodyText ? 'Details: ' + bodyText.slice(0,200) : ''}`;
+        toast.error(friendly);
+        setProbeResult({ ok: false, error: friendly });
+      } else if (!ct.includes('application/json')) {
+        const text = await res.text();
+        const friendly = `Unexpected response from server. ${text ? text.slice(0,200) : ''}`;
+        toast.error(friendly);
+        setProbeResult({ ok: false, error: friendly });
       } else {
-        setProbeResult({ ok: true, status: json.status, ip: parsed.ip, port: parsed.port });
-        toast.success("Device available");
+        const json = await res.json();
+        if (!json.ok) {
+          toast.error(json.error || "Check failed");
+          setProbeResult({ ok: false, error: json.error });
+        } else {
+          setProbeResult({ ok: true, status: json.status, ip: parsed.ip, port: parsed.port });
+          toast.success("Device available");
+        }
       }
     } catch (e) {
-      toast.error(e.message || "Check failed");
-      setProbeResult({ ok: false, error: e.message });
+      const friendly = `Network error: ${e.message}. Is the backend running at ${BACKEND_BASE}?`;
+      toast.error(friendly);
+      setProbeResult({ ok: false, error: friendly });
     } finally {
       setProbing(false);
     }
@@ -100,30 +149,40 @@ export default function ConnectPanel() {
     setProbing(true);
     setDevices([]);
     try {
-      const res = await fetch(`${BACKEND_BASE}/discover`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-      const json = await res.json();
-      if (json.ok) {
-        // Map to friendly device objects: show app name guess and port small
-        const detectName = (d) => {
-          try {
-            const s = d.status || {};
-            if (s.raw && s.raw.information) return 'VLC';
-            if (s.rawText && s.rawText.toLowerCase().includes('vlc')) return 'VLC';
-            // other heuristics could be added here
-            return 'Media Player';
-          } catch (e) {
-            return 'Media Player';
-          }
-        };
-
-        const devs = json.devices.map(d => ({ ip: d.ip, port: d.port, name: detectName(d), raw: d.status || d }));
-        setDevices(devs);
-        toast.success(`Found ${devs.length} device(s)`);
+  // request a quick scan with shorter timeouts to avoid long waits in the browser
+  const res = await fetch(`${BACKEND_BASE}/discover`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ quick: true, timeout: 800, concurrency: 200 }) });
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        const text = await res.text();
+        const friendly = `Discovery failed (${res.status}). ${text ? text.slice(0,200) : ''}`;
+        toast.error(friendly);
+      } else if (!ct.includes('application/json')) {
+        const text = await res.text();
+        const friendly = `Unexpected response from server during discovery. Details: ${text ? text.slice(0,200) : ''}`;
+        toast.error(friendly);
       } else {
-        toast.error(json.error || "No devices found");
+        const json = await res.json();
+        if (json.ok) {
+          // Map to friendly device objects: show app name guess and port small
+          const detectName = (d) => {
+            try {
+              const s = d.status || {};
+              if (s.raw && s.raw.information) return 'VLC';
+              if (s.rawText && String(s.rawText).toLowerCase().includes('vlc')) return 'VLC';
+              return 'Media Player';
+            } catch (e) { return 'Media Player'; }
+          };
+
+          const devs = json.devices.map(d => ({ ip: d.ip, port: d.port, name: detectName(d), raw: d.status || d }));
+          setDevices(devs);
+          toast.success(`Found ${devs.length} device(s)`);
+        } else {
+          toast.error(json.error || "No devices found");
+        }
       }
     } catch (e) {
-      toast.error(e.message || "Scan failed");
+      const friendly = `Network error: ${e.message}. Is the backend running at ${BACKEND_BASE}?`;
+      toast.error(friendly);
     } finally {
       setProbing(false);
     }
@@ -152,6 +211,28 @@ export default function ConnectPanel() {
 
       <div className="bg-card rounded-xl p-4 text-sm text-left">
         <div className="font-medium mb-2">Discovered devices</div>
+        {favorites.length > 0 && (
+          <div className="mb-3">
+            <div className="font-medium mb-1">Favorites</div>
+            <div className="space-y-2">
+              {favorites.map((f, i) => (
+                <div key={`fav-${f.ip}-${f.port}-${i}`} className="flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold">{f.name || 'Saved Device'}</div>
+                    <div className="text-xs text-muted-foreground" title={`${f.ip}:${f.port}`}>port {f.port} • {maskIp(f.ip)}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" onClick={() => handleConnect({ ip: f.ip, port: f.port })}>Connect</Button>
+                    <button title="Remove favorite" onClick={() => removeFavorite(f)} className="p-2 rounded hover:bg-muted/20">
+                      <Star className="w-4 h-4 text-yellow-400" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <hr className="my-3" />
+          </div>
+        )}
         {devices.length ? (
           <div className="space-y-2">
                 {devices.map((d, i) => (
@@ -162,6 +243,15 @@ export default function ConnectPanel() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button title={`Copy IP ${d.ip}`} onClick={() => { navigator.clipboard?.writeText(d.ip + ':' + d.port); toast.success('IP copied to clipboard'); }} className="text-xs text-muted-foreground px-2 py-1 rounded">IP</button>
+                      {favorites.find(f => f.ip === d.ip && f.port === d.port) ? (
+                        <button title="Remove favorite" onClick={() => removeFavorite(d)} className="p-2 rounded hover:bg-muted/20">
+                          <Star className="w-4 h-4 text-yellow-400" />
+                        </button>
+                      ) : (
+                        <button title="Add favorite" onClick={() => addFavorite(d)} className="p-2 rounded hover:bg-muted/20">
+                          <StarOff className="w-4 h-4 text-muted-foreground" />
+                        </button>
+                      )}
                       <Button size="sm" onClick={() => handleConnect({ ip: d.ip, port: d.port })}>Connect</Button>
                     </div>
                   </div>

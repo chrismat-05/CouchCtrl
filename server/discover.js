@@ -8,19 +8,19 @@ function ipBaseFromAddress(addr) {
   return `${parts[0]}.${parts[1]}.${parts[2]}`;
 }
 
-async function checkHost(ip, ports, auth) {
+async function checkHost(ip, ports, auth, timeout) {
   for (const port of ports) {
     try {
-      const status = await getStatus(ip, port, auth);
+      const status = await getStatus(ip, port, auth, timeout);
       return { ip, port, status };
     } catch (e) {
-      // ignore
+      // ignore and try next port
     }
   }
   return null;
 }
 
-export async function discoverNetwork({ ports = [8080, 8081, 8000, 3000, 9090, 8090, 8082, 8443], auth } = {}) {
+export async function discoverNetwork({ ports = [8080, 8081, 8000, 3000, 9090, 8090, 8082, 8443], auth, timeout = 700, concurrency = 50, quick = true, stopOnFirst = true } = {}) {
   // Determine local IPv4 addresses
   const nets = os.networkInterfaces();
   const candidates = [];
@@ -43,31 +43,40 @@ export async function discoverNetwork({ ports = [8080, 8081, 8000, 3000, 9090, 8
 
   const results = [];
 
-  // Limit concurrency
-  const concurrency = 60;
+  // Build tasks (support quick scan which checks a handful of common addresses)
   const tasks = [];
-
   for (const base of baseSet) {
-    for (let i = 1; i <= 254; i++) {
-      const ip = `${base}.${i}`;
-      tasks.push({ ip });
+    if (quick) {
+      // common likely hosts on home networks
+      const quickList = [1, 2, 10, 50, 100, 254];
+      for (const i of quickList) tasks.push({ ip: `${base}.${i}` });
+    } else {
+      for (let i = 1; i <= 254; i++) {
+        const ip = `${base}.${i}`;
+        tasks.push({ ip });
+      }
     }
   }
 
   let idx = 0;
   async function worker() {
-    while (idx < tasks.length) {
-      const cur = tasks[idx++];
+    while (true) {
+      const curIdx = idx++;
+      if (curIdx >= tasks.length) break;
+      // If requested, stop early when we already found a device
+      if (stopOnFirst && results.length > 0) break;
+      const cur = tasks[curIdx];
       try {
-        const found = await checkHost(cur.ip, ports, auth);
+        const found = await checkHost(cur.ip, ports, auth, timeout);
         if (found) results.push(found);
+        if (stopOnFirst && results.length > 0) break;
       } catch (e) {
-        // ignore
+        // ignore per-host errors
       }
     }
   }
 
-  const workers = new Array(concurrency).fill(0).map(() => worker());
+  const workers = new Array(Math.max(1, Math.min(concurrency, tasks.length))).fill(0).map(() => worker());
   await Promise.all(workers);
 
   return results;
