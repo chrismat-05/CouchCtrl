@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { createVlcSocket } from "@/lib/vlcWs";
 
-const BACKEND_BASE = process.env.VITE_COUCHCTRL_BACKEND || "http://localhost:3001";
+// Use Vite env instead of process.env in the browser
+const BACKEND_BASE = import.meta.env.VITE_COUCHCTRL_BACKEND || "http://localhost:3001";
 
 export default function ConnectPanel() {
   const [input, setInput] = useState("");
